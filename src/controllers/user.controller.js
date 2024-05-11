@@ -3,20 +3,10 @@ import { ApiError } from "../utils/ApiError.js";
 import { User } from "../models/user.model.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
+import fs from "fs";
 
 const registerUser = asyncHandler(async (req, res) => {
-  // get user details from frontend
-  // validation - not empty
-  // check if user already exist: username, email
-  // check for images, check for avatar
-  // upload them to cloudinary, avatar
-  // create user object - create entry in db
-  // remove password and refresh token field from response
-  // check for user creation
-  // return response
-
   const { fullName, email, username, password } = req.body;
-  console.log("email: ", email);
 
   if (
     [fullName, email, username, password].some((field) => field?.trim === "")
@@ -25,7 +15,7 @@ const registerUser = asyncHandler(async (req, res) => {
   }
 
   // Check if user exist
-  const existedUser = User.findOne({
+  const existedUser = await User.findOne({
     $or: [{ username }, { email }],
   });
 
@@ -34,11 +24,35 @@ const registerUser = asyncHandler(async (req, res) => {
   }
 
   // Get image from multer
-  const avatarLocalPath = req.files?.avatar[0]?.path;
-  const coverImageLocalPath = req.files?.coverImage[0]?.path;
+  let avatarLocalPath = null;
+  let coverImageLocalPath = null;
 
-  if (!avatarLocalPath) {
-    throw new ApiError(400, "Avatar file is required");
+  // Check if avatar image is present in file
+  if (
+    req.files &&
+    Array.isArray(req.files.avatar) &&
+    req.files.avatar.length > 0
+  ) {
+    avatarLocalPath = req.files.avatar[0].path;
+  } else {
+    // CoverImage get saved in folder due to middleware. So if avatar image is not present, we have to delete it.
+    if (
+      req.files &&
+      Array.isArray(req.files.coverImage) &&
+      req.files.coverImage.length > 0
+    ) {
+      fs.unlinkSync(req.files.coverImage[0].path);
+    }
+    throw new ApiError(500, "Avatar file is required");
+  }
+
+  // Check if coverImage is present in file (CoverImage is optional)
+  if (
+    req.files &&
+    Array.isArray(req.files.coverImage) &&
+    req.files.coverImage.length > 0
+  ) {
+    coverImageLocalPath = req.files.coverImage[0].path;
   }
 
   // Upload image on cloudinary
@@ -46,7 +60,7 @@ const registerUser = asyncHandler(async (req, res) => {
   const coverImage = await uploadOnCloudinary(coverImageLocalPath);
 
   if (!avatar) {
-    throw new ApiError(400, "Avatar file is required");
+    throw new ApiError(500, "Something went wrong, while uploading the file");
   }
 
   // Save data in database
@@ -59,7 +73,9 @@ const registerUser = asyncHandler(async (req, res) => {
     username: username.toLowerCase(),
   });
 
-  const createdUser = User.findById(user._id).select("-password -refreshToken");
+  const createdUser = await User.findById(user._id).select(
+    "-password -refreshToken"
+  );
 
   if (!createdUser) {
     throw new ApiError(500, "Something went wrong, while registering the user");
